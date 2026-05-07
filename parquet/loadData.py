@@ -70,12 +70,13 @@ def process_second_extract(spark_session, input_dir_path):
     
 # --- Main processing logic ---
 # Imagine you have a list of your source directories
-source_base_path = "/home/ionadmin/Documents/MongoAnalysis/IndexOpCount/index"
+# source_base_path = "/home/ionadmin/Documents/MongoAnalysis/IndexOpCount/index"
+source_base_path = "/home/ionadmin/Git/mongo-catalog-tracker/mongo_worksim/my_outdir"
 
 # Define your target Orc lake path
 parquet_lake_base_path = "/home/ionadmin/Git/mongo-catalog-tracker/data_lake/parquet"
 
-all_raw_second_dirs = glob(f"{source_base_path}/mongo02/*_*")
+all_raw_second_dirs = glob(f"{source_base_path}/demo01/*_*")
 
 for raw_dir in all_raw_second_dirs:
     for name_df_pair in process_second_extract(spark, raw_dir):

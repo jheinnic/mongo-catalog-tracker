@@ -38,6 +38,6 @@ df2 = spark.sql("""
         row.EdgeCount DESC, row.PriorAscendingLabel ASC,
         row.StateBefore ASC, row.StateAfter ASC
 """)
-df2.show(500, truncate=False)
+df2.show(1000, truncate=False)
 
 spark.stop();

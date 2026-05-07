@@ -25,10 +25,8 @@ df_re_read3.createOrReplaceTempView("partition_ranges")
 
 df1 = spark.sql("""
     WITH AllKnownCollectionsEver AS (
-        SELECT v.mongo_hostname, v.CollectionName, MIN(v.Since) AS IsKnownAsOf
+        SELECT v.mongo_hostname, v.CollectionName, from_unixtime(MIN( (v.days_post_epoch * 86400) + v.seconds_of_day )) AS IsKnownAsOf
         FROM op_count_item AS v
-        WHERE v.CollectionName NOT LIKE 'audit%'
-            AND v.CollectionName NOT LIKE '%AnnotationSource.metas%'
         GROUP BY v.mongo_hostname, v.CollectionName
         HAVING SUM(v.UseCount) > 0
     ),

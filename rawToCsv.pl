@@ -2,6 +2,7 @@
 
 
 sub calculate_use {
+	my $dbName = shift;
 	my $targetFile = shift;
 	my $outputFile = shift;
 	open(INPUT, $targetFile);
@@ -14,24 +15,24 @@ sub calculate_use {
 	my $readState = 'expect_collection';
 	my $trackedVariome = {};
 	my $lineCount = 0;
-	my $inputLine = '';
+	my $inputLine = <INPUT>;
 
 	while($inputLine = <INPUT>) {
 		chomp $inputLine;
 		# print("## ${inputLine} ##\n");
 		$lineCount = $lineCount + 1;
 		if ($readState eq 'expect_collection') {
-			if ($inputLine =~ /^(Variome.*):$/) {
+			if ($inputLine =~ /^(${dbName}.*):$/) {
 				$collectionName = $1;
 				$readState = 'expect_index';
 			} elsif (($inputLine =~ /simagix\/keyhole/) or ($inputLine =~ /I GetIndexes ends/)) { 
 				# No-op for verbosity preamble/postinfo
 			} else {
-				print "Compilation error!  Expected Variome line, but read <${inputLine}> at <${lineCount}>\n";
+				print "Compilation error!  Expected collection name line, but read <${inputLine}> at <${lineCount}>\n";
 				exit -1;
 			}
 		} elsif ($readState eq 'expect_index_or_collection') {
-			if ($inputLine =~ /^(Variome.*):$/) {
+			if ($inputLine =~ /^(${dbName}.*):$/) {
 				$collectionName = $1;
 				$indexName = '';
 				$readState = 'expect_index';
@@ -41,7 +42,7 @@ sub calculate_use {
 			} elsif ($inputLine =~ /is larger than the max int32/) {
 				# No-op for verbosity
 			} else {
-				print "Compilation error!  Expected Variome or index line, but read <${inputLine}> at <${lineCount}>\n";
+				print "Compilation error!  Expected collection or index line, but read <${inputLine}> at <${lineCount}>\n";
 				exit -1;
 			}
 		} elsif ($readState eq 'expect_index') {
@@ -73,6 +74,7 @@ sub calculate_use {
 	close INPUT;
 }
 
-my $fileArg = $ARGV[0];
-my $outputArg = $ARGV[1];
-calculate_use($fileArg, $outputArg);
+my $dbName = $ARGV[0];
+my $fileArg = $ARGV[1];
+my $outputArg = $ARGV[2];
+calculate_use(${dbName}, ${fileArg}, ${outputArg});

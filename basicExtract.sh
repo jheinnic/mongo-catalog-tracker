@@ -12,6 +12,13 @@ then
 	exit -2
 fi
 
+if [[ "x${2}" == 'x' ]]
+then
+    dbName='loadtest'
+else
+    dbName="${2}"
+fi
+
 if [[ -r trimmedCleanedSifted.dat ]]
 then
    rm trimmedCleanedSifted.dat
@@ -22,5 +29,5 @@ cat idx.log | sed 's/^[^{]\+{/{/' | sed 's/}[^}]\+$/}/' | grep -v '^$' | grep -v
 # rm -rf records
 # mkdir -p records
 
-"${scriptDir}/rawToCsv.pl" trimmedCleanedSifted.dat allCollectionIndices.csv
+"${scriptDir}/rawToCsv.pl" "${dbName}" trimmedCleanedSifted.dat allCollectionIndices.csv
 
