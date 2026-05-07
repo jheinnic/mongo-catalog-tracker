@@ -1,0 +1,70 @@
+# sim_params.yaml  –  Tunable parameters for the MongoDB load-test simulator.
+# Pass this file with  --config sim_params.yaml
+# Any value can be overridden on the command line where a matching flag exists
+# (currently only --name-pattern).
+
+# ── Name generation ───────────────────────────────────────────────────────────
+# Pattern for auto-generated expansion-pool names.
+# Each uppercase X is replaced with one random character from [a-z0-9],
+# exactly like mktemp(1).  The number of X characters sets the suffix length.
+# With 8 X's the pool is ~2.8 trillion combinations, far beyond any n_expansion.
+name_pattern: "lt_XXXXXXXX"
+
+# ── Pool sizes ────────────────────────────────────────────────────────────────
+# Number of expansion names to pre-generate.  Must be >= the sum of all
+# per-interval create counts (roughly n_intervals * target_create_mu).
+n_expansion: 25000
+
+# Number of bootstrap names to sub-sample for the retirement-deletion list.
+n_deletion: 380
+
+# Number of simulation intervals to run.
+n_intervals: 40
+
+# ── New-creation count per interval (Gaussian, clipped) ──────────────────────
+target_create_mu:    625
+target_create_sigma:  12
+target_create_min:   600
+target_create_max:   650
+
+# ── Bootstrap activations per interval (Gaussian, clipped) ───────────────────
+bs_activate_mu:    150
+bs_activate_sigma:  25
+bs_activate_min:   100
+bs_activate_max:   200
+
+# ── Forgotten-pool re-activations per interval (Gaussian, clipped) ────────────
+# Re-activations begin at interval 2 (nothing is forgotten until after interval 1).
+reactivate_mu:    100
+reactivate_sigma:  25
+reactivate_min:    50
+reactivate_max:   150
+
+# ── 380-sublist deletions per interval (Gaussian, clipped) ───────────────────
+del_sublist_mu:     9
+del_sublist_sigma:  2
+del_sublist_min:    3
+del_sublist_max:   15
+
+# ── Pipeline promotion / ignore fractions ────────────────────────────────────
+# For each active stage, this fraction is *ignored* (dropped from pipeline).
+# The remaining items are split: 5 % of created-origin are queried-then-deleted,
+# the rest are promoted to the next stage.
+stage_ignore_frac:
+  active1: 0.33   # 33 % ignored → 62 % promote, 5 % of created hard-deleted
+  active2: 0.70   # 70 % ignored → 25 % promote, 5 % of created hard-deleted
+  active3: 0.90   # 90 % ignored →  5 % promote, 5 % of created hard-deleted
+  # active4 is always fully returned to pools; no ignore / delete step.
+
+# Fraction of created-origin items in each stage's promote group to
+# query-then-permanently-delete rather than carry forward.
+delete_frac_created: 0.05
+
+# ── Execution ─────────────────────────────────────────────────────────────────
+# Default thread-pool size for parallel MongoDB operations.
+# Can be overridden with --workers on the command line.
+workers: 16
+
+# Default MongoDB database name.
+# Can be overridden with --db-name on the command line.
+db_name: "loadtest"

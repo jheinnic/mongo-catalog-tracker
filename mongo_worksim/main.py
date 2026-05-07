@@ -9,51 +9,54 @@ Usage
 Positional arguments
 ────────────────────
     plan_dir    Root directory where all pre-rolled plan files are stored.
-    output_dir  Root directory where keyhole output subdirectories are written.
-                Each keyhole capture lands in a subdirectory named
+    output_dir  Root directory for keyhole output sub-directories.
+                Each capture lands in a sub-directory named
                 <days_since_epoch>_<seconds_past_midnight>.
 
 Required options
 ────────────────
     --mongo-uri   <uri>   MongoDB connection URI
-                          e.g. mongodb://localhost:27017
-    --keyhole-url <url>   URL passed to  keyhole --index <url>
-    --names-file  <path>  Text file with exactly 1500 collection names,
-                          one per line.
+    --keyhole-url <url>   URL passed verbatim to  keyhole --index <url>
+    --names-file  <path>  Text file with bootstrap collection names (one per line)
 
-Optional options
-────────────────
-    --db-name         <str>   MongoDB database name  (default: loadtest)
-    --workers         <int>   Thread-pool size for parallel ops  (default: 16)
-    --seed            <int>   Random seed for reproducibility
-    --skip-bootstrap          Skip bootstrap phase (collections already exist)
-    --skip-preroll            Skip pre-roll phase (plan files already exist)
-    --start-interval  <int>   Resume from this interval  (default: 1)
-    --log-level       <str>   DEBUG | INFO | WARNING | ERROR  (default: WARNING)
+Key optional options
+────────────────────
+    --config       <path>    sim_params.yaml to load  (default: sim_params.yaml
+                             in the same directory as this script)
+    --name-pattern <pattern> mktemp-style pattern overriding the one in the YAML.
+                             Each uppercase X is replaced by a random [a-z0-9]
+                             character.  Example: "run1_XXXXXXXXXX"
+    --seed         <int>     RNG seed for reproducibility
+    --workers      <int>     Thread-pool size  (overrides YAML; default: 16)
+    --db-name      <str>     MongoDB database name  (overrides YAML)
+    --skip-bootstrap         Skip collection creation phase
+    --skip-preroll           Skip plan generation phase
+    --start-interval <int>   Resume from this interval  (default: 1)
+    --log-level    <str>     DEBUG | INFO | WARNING | ERROR  (default: WARNING)
 
 Simulation overview
 ───────────────────
   Phase 1 – Bootstrap
-      Create all 1 500 bootstrap collections in parallel, then pause for the
-      operator to restart MongoDB (so they pre-exist the instance).
+      Create all bootstrap collections in parallel, then pause for the operator
+      to restart MongoDB so they pre-exist the instance.
 
   Phase 2 – Pre-roll
-      Simulate all 40 intervals' decisions up-front and write one JSON plan
-      file per interval into plan_dir.
+      Simulate all N intervals' decisions up-front and write one JSON plan file
+      per interval into plan_dir, along with supporting reference files.
 
   Phase 3 – Execute
-      Run keyhole before interval 1, then for each of the 40 intervals:
-        • Process the Active1–Active4 aging pipeline (queries / promotions /
-          deletions) as specified in the pre-rolled plan.
-        • Create and exercise ~625 new collections.
-        • Activate 100–200 bootstrap and 50–150 forgotten collections.
-        • Delete 3–15 collections from the 380-name retirement sublist.
-        • Run keyhole after the interval completes.
+      Run keyhole before interval 1, then for each interval:
+        • Process the Active1–Active4 aging pipeline
+        • Create and exercise ~625 new collections
+        • Activate bootstrap and forgotten collections
+        • Delete collections from the retirement sublist
+        • Run keyhole after the interval completes
 """
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import datetime
 import json
 import logging
 import os
@@ -63,9 +66,44 @@ import time
 import pymongo
 import pymongo.errors
 
+try:
+    import yaml
+except ImportError:
+    yaml = None  # handled below with a clear error message
+
 from executor import execute_interval, run_keyhole
 from mongo_ops import create_collection
 from preroll import preroll
+
+
+# ── config loading ────────────────────────────────────────────────────────────
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_DEFAULT_CONFIG = os.path.join(_SCRIPT_DIR, "sim_params.yaml")
+
+
+def _load_params(config_path: str) -> dict:
+    """Load and return the YAML parameter file."""
+    if yaml is None:
+        print("ERROR: PyYAML is not installed.  Run:  pip install pyyaml")
+        sys.exit(1)
+    if not os.path.exists(config_path):
+        print(f"ERROR: Config file not found: {config_path}")
+        sys.exit(1)
+    with open(config_path) as fh:
+        params = yaml.safe_load(fh)
+    return params
+
+
+def _apply_cli_overrides(params: dict, args: argparse.Namespace) -> dict:
+    """Overlay any CLI flags that override YAML values."""
+    if args.name_pattern is not None:
+        params["name_pattern"] = args.name_pattern
+    if args.workers is not None:
+        params["workers"] = args.workers
+    if args.db_name is not None:
+        params["db_name"] = args.db_name
+    return params
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -73,34 +111,40 @@ from preroll import preroll
 def _load_names(path: str) -> list[str]:
     with open(path) as fh:
         names = [ln.strip() for ln in fh if ln.strip()]
-    if len(names) != 1500:
-        print(f"WARNING: expected 1500 names in {path}, found {len(names)}. "
-              "Continuing anyway.")
+    if not names:
+        print(f"ERROR: names file is empty: {path}")
+        sys.exit(1)
+    print(f"  Loaded {len(names):,} bootstrap names from {path}")
     return names
 
 
 def _get_db(mongo_uri: str, db_name: str):
-    client = pymongo.MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-    client.admin.command("ping")   # fail fast if unreachable
+    client = pymongo.MongoClient(mongo_uri, serverSelectionTimeoutMS=5_000)
+    client.admin.command("ping")
     return client[db_name]
 
 
-def _bootstrap(mongo_uri: str, db_name: str, names: list[str], workers: int) -> None:
+def _bootstrap(
+    mongo_uri: str,
+    db_name: str,
+    names: list[str],
+    workers: int,
+) -> None:
     """Create all bootstrap collections in parallel with progress reporting."""
     print(f"\n{'=' * 68}")
-    print(f"  BOOTSTRAP – creating {len(names)} collections")
+    print(f"  BOOTSTRAP – creating {len(names):,} collections")
     print(f"{'=' * 68}")
 
     db = _get_db(mongo_uri, db_name)
-    total = len(names)
+    total   = len(names)
     counter = [0]
 
-    def _create(name: str):
+    def _create(name: str) -> None:
         create_collection(db, name)
         counter[0] += 1
         n = counter[0]
         if n % 100 == 0 or n == total:
-            print(f"    {n:>5}/{total} created", flush=True)
+            print(f"    {n:>5,}/{total:,} created", flush=True)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         futs = {ex.submit(_create, n): n for n in names}
@@ -110,15 +154,15 @@ def _bootstrap(mongo_uri: str, db_name: str, names: list[str], workers: int) -> 
             except Exception as exc:
                 print(f"    !! create error '{futs[fut]}': {exc}")
 
-    print(f"\n  Bootstrap complete – {total} collections created.")
+    print(f"\n  Bootstrap complete – {total:,} collections created.")
 
 
 def _pause_for_restart(mongo_uri: str, db_name: str) -> None:
-    """Print instructions, wait for ENTER, then verify reconnection."""
+    """Prompt the operator to restart MongoDB, then verify reconnection."""
     print("\n" + "=" * 68)
     print("  ⚠️   BOOTSTRAP COMPLETE")
     print()
-    print("  Please RESTART MongoDB now so that the 1 500 collections")
+    print("  Please RESTART MongoDB now so that the bootstrap collections")
     print("  pre-exist the instance.")
     print()
     print("  Press ENTER once MongoDB is back up …")
@@ -126,11 +170,11 @@ def _pause_for_restart(mongo_uri: str, db_name: str) -> None:
     input()
 
     print("\n  Verifying MongoDB connection", end="", flush=True)
-    for attempt in range(15):
+    for _ in range(15):
         try:
             db = _get_db(mongo_uri, db_name)
             count = len(db.list_collection_names())
-            print(f"  ✓  Connected – {count} collections visible.")
+            print(f"\n  ✓  Connected – {count:,} collections visible.")
             return
         except Exception:
             print(".", end="", flush=True)
@@ -161,24 +205,32 @@ def main() -> None:
     parser.add_argument("--keyhole-url", required=True,
                         help="URL argument for  keyhole --index <url>")
     parser.add_argument("--names-file",  required=True,
-                        help="Text file with 1500 collection names, one per line")
+                        help="Bootstrap collection names, one per line")
 
-    # optional
-    parser.add_argument("--db-name",   default="loadtest",
-                        help="MongoDB database name  (default: loadtest)")
-    parser.add_argument("--workers",   type=int, default=16,
-                        help="Parallel worker threads  (default: 16)")
-    parser.add_argument("--seed",      type=int, default=None,
-                        help="Random seed for reproducibility")
-    parser.add_argument("--skip-bootstrap", action="store_true",
-                        help="Skip bootstrap phase")
-    parser.add_argument("--skip-preroll",   action="store_true",
-                        help="Skip pre-roll phase (plan files must already exist)")
-    parser.add_argument("--start-interval", type=int, default=1,
+    # config
+    parser.add_argument("--config", default=_DEFAULT_CONFIG, metavar="PATH",
+                        help=f"sim_params.yaml path  (default: {_DEFAULT_CONFIG})")
+    parser.add_argument("--name-pattern", default=None, metavar="PATTERN",
+                        help="mktemp-style name pattern, e.g. 'run1_XXXXXXXXXX' "
+                             "(overrides YAML name_pattern)")
+
+    # CLI overrides for common YAML values
+    parser.add_argument("--db-name",  default=None,
+                        help="MongoDB database name  (overrides YAML db_name)")
+    parser.add_argument("--workers",  type=int, default=None,
+                        help="Parallel thread count  (overrides YAML workers)")
+    parser.add_argument("--seed",     type=int, default=None,
+                        help="RNG seed for reproducibility")
+
+    # execution control
+    parser.add_argument("--skip-bootstrap",  action="store_true",
+                        help="Skip collection creation phase")
+    parser.add_argument("--skip-preroll",    action="store_true",
+                        help="Skip plan generation phase (plan files must exist)")
+    parser.add_argument("--start-interval",  type=int, default=1,
                         help="Resume from this interval number  (default: 1)")
     parser.add_argument("--log-level", default="WARNING",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-                        help="Logging verbosity  (default: WARNING)")
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
 
     args = parser.parse_args()
 
@@ -187,6 +239,21 @@ def main() -> None:
         format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
     )
 
+    # ── load and merge params ─────────────────────────────────────────
+    print(f"\n  Loading config: {args.config}")
+    params = _load_params(args.config)
+    params = _apply_cli_overrides(params, args)
+
+    workers  = params.get("workers",  16)
+    db_name  = params.get("db_name",  "loadtest")
+    n_itvs   = params.get("n_intervals", 40)
+
+    print(f"  name_pattern : {params['name_pattern']}")
+    print(f"  n_intervals  : {n_itvs}")
+    print(f"  n_expansion  : {params['n_expansion']:,}")
+    print(f"  workers      : {workers}")
+    print(f"  db_name      : {db_name}")
+
     os.makedirs(args.plan_dir,   exist_ok=True)
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -194,51 +261,53 @@ def main() -> None:
 
     # ── Phase 1: Bootstrap ────────────────────────────────────────────
     if not args.skip_bootstrap:
-        _bootstrap(args.mongo_uri, args.db_name, names, args.workers)
-        _pause_for_restart(args.mongo_uri, args.db_name)
+        _bootstrap(args.mongo_uri, db_name, names, workers)
+        _pause_for_restart(args.mongo_uri, db_name)
     else:
         print("  (--skip-bootstrap: skipping collection creation)")
 
     # ── Phase 2: Pre-roll ─────────────────────────────────────────────
     if not args.skip_preroll:
         print(f"\n{'=' * 68}")
-        print(f"  PRE-ROLL – generating all 40 interval plans")
+        print(f"  PRE-ROLL – generating {n_itvs} interval plans")
         print(f"{'=' * 68}")
-        preroll(names, args.plan_dir, seed=args.seed)
+        preroll(names, args.plan_dir, params=params, seed=args.seed)
     else:
         print("  (--skip-preroll: using existing plan files)")
-        # Sanity-check that the plan files are present
         missing = [
             f"interval_{i:02d}.json"
-            for i in range(args.start_interval, 41)
+            for i in range(args.start_interval, n_itvs + 1)
             if not os.path.exists(
                 os.path.join(args.plan_dir, f"interval_{i:02d}.json")
             )
         ]
         if missing:
-            print(f"\n  ✗  Missing plan files: {missing[:5]} …")
+            print(f"\n  ✗  Missing plan files: {missing[:5]}"
+                  f"{'…' if len(missing) > 5 else ''}")
             sys.exit(1)
 
-    # ── Phase 3: Execute 40 intervals ────────────────────────────────
+    # ── Phase 3: Execute ──────────────────────────────────────────────
     print(f"\n{'=' * 68}")
-    print(f"  EXECUTION – running intervals {args.start_interval}–40")
+    print(f"  EXECUTION – running intervals {args.start_interval}–{n_itvs}")
     print(f"{'=' * 68}")
 
     try:
-        db = _get_db(args.mongo_uri, args.db_name)
+        db = _get_db(args.mongo_uri, db_name)
     except Exception as exc:
         print(f"\n  ✗  Cannot connect to MongoDB: {exc}")
         sys.exit(1)
 
-    n_intervals = 40
-    first       = args.start_interval
-
-    # Initial keyhole capture (before interval 1, or before the resume point)
+    first = args.start_interval
     initial_label = (f"before_interval_{first:02d}"
                      if first > 1 else "before_interval_01_initial")
-    run_keyhole(args.keyhole_url, args.output_dir, label=initial_label)
+    _now       = datetime.datetime.now()
+    start_day  = (_now.date() - datetime.date(1970, 1, 1)).days - n_itvs
+    start_secs = _now.hour * 3600 + _now.minute * 60 + _now.second
 
-    for interval in range(first, n_intervals + 1):
+    run_keyhole(args.keyhole_url, args.output_dir, label=initial_label,
+                virtual_day=start_day, virtual_secs=start_secs)
+
+    for interval in range(first, n_itvs + 1):
         plan_path = os.path.join(args.plan_dir, f"interval_{interval:02d}.json")
         if not os.path.exists(plan_path):
             print(f"\n  ✗  Plan file not found: {plan_path}")
@@ -247,18 +316,21 @@ def main() -> None:
         with open(plan_path) as fh:
             plan = json.load(fh)
 
-        execute_interval(db=db, plan=plan, workers=args.workers)
+        execute_interval(db=db, plan=plan, workers=workers)
 
         run_keyhole(
             args.keyhole_url,
             args.output_dir,
             label=f"after_interval_{interval:02d}",
+            virtual_day=start_day + (interval - first + 1),
+            virtual_secs=start_secs,
         )
 
     # ── Done ──────────────────────────────────────────────────────────
-    executed = n_intervals - first + 1
+    executed = n_itvs - first + 1
     print(f"\n{'=' * 68}")
     print(f"  ✓  Simulation complete – {executed} interval(s) executed.")
+    print(f"     Config     : {args.config}")
     print(f"     Plan files : {args.plan_dir}")
     print(f"     keyhole out: {args.output_dir}")
     print(f"{'=' * 68}\n")

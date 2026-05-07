@@ -9,7 +9,6 @@ import datetime
 import json
 import os
 import subprocess
-import time
 import logging
 from typing import Callable, List
 
@@ -26,29 +25,25 @@ log = logging.getLogger(__name__)
 
 # ── keyhole helpers ───────────────────────────────────────────────────────────
 
-def _keyhole_dirname() -> str:
+def _keyhole_dirname(days: int, secs: int) -> str:
     """
     Build a directory name of the form  <days_since_epoch>_<seconds_past_midnight>
     using zero-padded 5-digit fields.
     """
-    epoch  = datetime.date(1970, 1, 1)
-    today  = datetime.date.today()
-    days   = (today - epoch).days
-    now    = datetime.datetime.now()
-    secs   = now.hour * 3600 + now.minute * 60 + now.second
     return f"{days:05d}_{secs:05d}"
 
 
-def run_keyhole(keyhole_url: str, output_root: str, label: str) -> str:
+def run_keyhole(keyhole_url: str, output_root: str, label: str,
+                virtual_day: int, virtual_secs: int) -> str:
     """
     Invoke ``keyhole --index <keyhole_url>``, write stdout / stderr / metadata
     into a timestamped sub-directory of *output_root*, and return that path.
 
-    A 1-second sleep guards against duplicate directory names when two keyhole
-    calls land in the same wall-clock second.
+    *virtual_day* and *virtual_secs* supply the simulated clock value for the
+    directory name; the caller increments virtual_day by 1 per interval so that
+    output directories reflect a day-per-interval cadence regardless of wall time.
     """
-    time.sleep(1)
-    dir_name = _keyhole_dirname()
+    dir_name = _keyhole_dirname(virtual_day, virtual_secs)
     out_dir  = os.path.join(output_root, dir_name)
     os.makedirs(out_dir, exist_ok=True)
 
