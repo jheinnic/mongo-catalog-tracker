@@ -37,8 +37,7 @@ df1 = spark.sql(f"""
             CONCAT(row.ActivityPolicyStatus, row.PartitionRank) AS StateAfter
         FROM PolicyWithLag AS row
         WHERE row.PriorActivityPolicyStatus IS NOT NULL
-    ),
-    TransitionCounts AS (
+    )
         SELECT
             row.mongo_hostname,
             row.StateBefore,
@@ -56,14 +55,24 @@ df1 = spark.sql(f"""
             EdgeCount DESC,
             row.StateBefore ASC,
             row.StateAfter ASC
-    )
-    SELECT 
-        CONCAT(row.StateBefore, ',', row.StateAfter, ',', row.EdgeCount) AS samkey_row
-    FROM TransitionCounts as row
 """)
+
+df1.createOrReplaceTempView('transition_counts')
+
         # row.mongo_hostname,
-    
-df1.show(5000, truncate=False)
+# df2 = spark.sql("""
+#     SELECT 
+#         CONCAT(row.StateBefore, ',', row.StateAfter, ',', row.EdgeCount) AS samkey_row
+#     FROM transition_counts as row
+# """)
+# df2.show(5000, truncate=False)
+
+df3 = spark.sql("""
+    SELECT 
+        CONCAT(row.StateBefore, ' [', row.EdgeCount, '] ', row.StateAfter) AS samkey_row
+    FROM transition_counts as row
+""")
+df3.show(5000, truncate=False)
 
 spark.stop();
 

@@ -3,9 +3,6 @@
 set -x
 set -e
 
-AWS_DEFAULT_REGION=us-east-1
-export AWS_DEFAULT_REGION
-
 script_dir="$( /usr/bin/dirname "${0}" )"
 bucket_name="${1}"
 path_prefix="${2}"
@@ -16,6 +13,9 @@ day_second="$(( epoch_seconds % day_num ))"
 tos3="$( /bin/mktemp )"
 /bin/rm "${tos3}"
 /usr/bin/mkfifo "${tos3}"
+
+AWS_DEFAULT_REGION=us-east-1
+export AWS_DEFAULT_REGION
 
 instance_id="$(cloud-init query instance-id)"
 instance_name="$(aws ec2 describe-instances --instance-id "${instance_id}" | jq -r '.Reservations[0].Instances[0].Tags[] | select(.Key == "Name") | .Value')"

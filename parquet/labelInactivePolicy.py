@@ -13,7 +13,7 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 parquet_lake_base_path = "/home/ionadmin/Git/mongo-catalog-tracker/data_lake/parquet"
-n_inactivity = 5
+n_inactivity = 14
 
 df_re_read1 = spark.read.parquet(f"{parquet_lake_base_path}/collectionDiscreteLabels")
 df_re_read1.createOrReplaceTempView("collection_discrete_labels")
