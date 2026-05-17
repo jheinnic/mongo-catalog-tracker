@@ -1,4 +1,13 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "pymongo>=3.12,<5.0",
+#     "pyyaml>=6.0.3",
+# ]
+# ///
+
 """
 main.py  –  MongoDB collection/index load-test simulator
 
