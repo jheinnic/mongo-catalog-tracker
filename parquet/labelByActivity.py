@@ -24,9 +24,9 @@ df_re_read2.createOrReplaceTempView("op_count_item")
 df_re_read3.createOrReplaceTempView("partition_ranges")
 
 # Compute and store raw per-sample collection state labels.
-# Persisting at this stage (before any N-policy is applied) allows the
-# basicSamkey Sankey to be recomputed with a different n_inactivity
-# without rerunning the full outer join and classification logic.
+# Persisting at the single-interval categories facilitates computing Sankey with any
+# number of days used for the inactivity threshold using window functions in terms of
+# those labels that are more easily understood.
 df1 = spark.sql("""
     WITH AllKnownCollectionsEver AS (
         SELECT v.mongo_hostname, v.CollectionName,
@@ -45,7 +45,7 @@ df1 = spark.sql("""
             ) AS UseCountBefore,
             (row.UseCount IS NULL
                 AND v.IsKnownAsOf < p.this_event_at) AS IsPurgedCollection,
-            future.UseCount IS NULL AS IsFutureCollection
+            (v.IsKnownAsOf > p.first_event_at) AS IsFutureCollection
         FROM AllKnownCollectionsEver AS v
             JOIN partition_ranges AS p
                 ON v.mongo_hostname = p.mongo_hostname
@@ -54,11 +54,6 @@ df1 = spark.sql("""
                 AND p.days_post_epoch = row.days_post_epoch
                 AND p.seconds_of_day = row.seconds_of_day
                 AND v.CollectionName = row.CollectionName
-            LEFT OUTER JOIN collection_agg AS future
-                ON p.mongo_hostname = future.mongo_hostname
-                AND p.first_days_post = future.days_post_epoch
-                AND p.first_seconds_of = future.seconds_of_day
-                AND v.CollectionName = future.CollectionName
     ),
     ClassifyUse AS (
         SELECT row.*,
@@ -122,9 +117,6 @@ df1 = spark.sql("""
         row.CollectionUseStatus
     FROM ClassifyUse AS row
 """)
-
-df1.createOrReplaceTempView("collection_discrete_labels")
-df1.show(750000, truncate=False)
 
 df1.write \
     .partitionBy("mongo_hostname", "days_post_epoch", "seconds_of_day") \
