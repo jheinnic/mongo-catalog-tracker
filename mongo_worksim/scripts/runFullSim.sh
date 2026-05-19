@@ -49,7 +49,7 @@ then
 fi
 
 # . "${scriptDir}/../.venv/bin/activate"
-"${scriptDir}/../main.py" \
+"${scriptDir}/../src/mongo_worksim/__init__.py" \
     --mongo-uri   "${mongoDBUri}" \
     --keyhole-url "${mongoDBUri}" \
     --names-file  "${simRoot}/names-file.txt" \

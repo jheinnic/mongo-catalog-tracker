@@ -303,3 +303,57 @@ interval 17 begins, maintaining the unbroken before/after sequence.
 | `mongo_ops.py` | `create_collection`, `query_collection`, `delete_collection` and helpers |
 | `sim_params.yaml` | All tunable simulation parameters |
 | `requirements.txt` | Python dependencies (`pymongo`, `pyyaml`) |
+
+## Opinionated Start script
+
+Under scripts, you'll find a script that embeds knowledge about a set of project layout conventions
+that can launch a simulation run and prepare content for the analysis tasks by simulating a 
+sustained duration of data collection under a model-driven workload
+
+### Layout: Opinionated Simulation Root
+
+Project structure consists of two directories, one for the simulation state, another to serve
+as a data lake.  Simulation state is where you will have placed:
+1) `name-list.txt` :: The list of pre-existing collection names that the execution engine will create before restarting MongoDB once at the start of the workload and then draw on from
+for pre-server activation, rotation back to quiescence, and for the pool of object deleted from before the initial MongoDB startup.
+2) `sim_params.yaml` :: The parameters file with tuneable input dictating the rate and duration
+of simulated activity.  See above for more about what its content means.
+
+The simulation directory is where the pre-rolling randomizer places `generatedPlan`, a data
+model describing the sequents of use activity rhar is created from the specification in
+`sim_params.yaml` and then is played back with a pause between simulated "days" to collect
+a keyhole index op counter report that the analytical side of this project can then be used to
+draw visualizations and play what-if retrospective scenarios from to assist with real
+world capacity planing.
+
+### Layout: Data Lake Root
+
+The convention of naming daily export log directories using a compound timestamp, encoded
+as two numbers separated by an underscore, is an expectation set by the analytic tools 
+themselves, not this framework, expect.   The directory must be initially empty for this script
+to use it, and the duration the simulation runs for that affects the number of report days
+included is found in the sim_params.yaml file.
+
+A convention this script does introduce is that the sequence of encoded dates will begin
+far enough back that the configured duration of execusion will place the last report at the
+time the execution engine is launched.
+
+### Use example
+
+After filling out sim_params.yaml and name-list.txt, place them in the simulation described
+above, create an empty data lake directory, and get the connection URL for Mongo DB.
+
+<repositoryRoot>/mongo_worksim/scripts/runFullSim.sh <MonogoDbURL> <simulationRootDir> <dataLakeRootDir>
+
+After the simulation is complete, you won't need the <simulationRootDir> unless you chose to
+create a new data set from its parameter state.  You will use teh <dataLakeRootDir> to provide
+the eponymous argument for the analysis script's "loadReportHistory.sh" helper script.   Analysis
+will add a third directory for the analytic warehouse--you will need to create that still as it
+plays no role in this workload model simulator.
+
+### Limitations
+
+runFullSim.sh doesn't cover simplifying argument such as skipping the simulation playback
+model, or resuming from a partially completed run.   Command line arguments exist for advanced
+cases like these exist, but it will be necessary to read the documentation and access them 
+through the mongo_worksim's `main.py` executable.
