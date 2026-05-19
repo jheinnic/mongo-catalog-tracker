@@ -1,4 +1,14 @@
 {
    "python.analysis.typeCheckingMode": "standard",
-   "cSpell.words": ["itvs"]
+   "python.analysis.extraPaths": ["analysis/src"],
+   "cSpell.words": [
+      "Dotenv",
+      "itvs",
+      "Sankey",
+      "unixtime",
+      "worksim",
+      "xorc",
+      "xparquet"
+   ],
+   "python.terminal.useEnvFile": true
 }
