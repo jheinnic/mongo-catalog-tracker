@@ -7,4 +7,4 @@ warehouseRoot=$(getWarehouseRoot)
 warehouseFormat=$(getWarehouseFormat)
 daysBeforeInactive=$(getDaysBeforeInactive)
 
-labelInactivePolicy --warehouseRoot "${warehouseRoot}" --warehouseFormat "${warehouseFormat}" --daysBeforeInactive "${daysBeforeInactive}"
+labelInactivePolicy --warehouseRoot "${warehouseRoot}" --warehouseFormat "${warehouseFormat}" --nInactivity "${daysBeforeInactive}"

@@ -3,7 +3,7 @@ from pyspark.sql import SparkSession
 
 def main(command: dict, spark=None) -> None:
     warehouse_root = command["warehouse_root"]
-    n_inactivity   = command.get("n_inactivity", 14)
+    n_inactivity   = command.get("n_inactivity", 14) - 1
 
     if spark is None:
         spark = (
@@ -37,7 +37,7 @@ def main(command: dict, spark=None) -> None:
                     OVER (
                         PARTITION BY row.mongo_hostname, row.CollectionName
                         ORDER BY row.PartitionRank ASC
-                        ROWS BETWEEN {n_inactivity} PRECEDING AND 1 PRECEDING
+                        ROWS BETWEEN {n_inactivity} PRECEDING AND 0 PRECEDING
                     ) AS ActiveCountInPriorN,
                 SUM(CASE WHEN row.CollectionUseStatus IN ('Current', 'Accessed') THEN 1 ELSE 0 END)
                     OVER (

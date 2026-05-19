@@ -20,6 +20,8 @@ def main(command: LoadDataCommand, spark=None) -> None:
             .config("spark.driver.maxResultSize", "4g")
             .config("spark.executor.memory", "16g")
             .config("spark.executor.memoryOverhead", "2g")
+            .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+            .config("spark.hadoop.fs.s3a.aws.credentials.provider", "com.amazonaws.auth.DefaultAWSCredentialsProviderChain")
             .getOrCreate()
         )
 
